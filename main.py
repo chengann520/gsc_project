@@ -9,7 +9,7 @@ from googleapiclient.discovery import build
 # from google.analytics.data_v1beta import BetaAnalyticsDataClient
 
 # ================= 設定區 =================
-SITE_URL = 'https://chengann.github.io/'
+SITE_URL = 'https://chengann520.github.io/Chengann/'
 DB_NAME = 'gsc_data.db'
 TABLE_NAME = 'search_performance'
 # =========================================
