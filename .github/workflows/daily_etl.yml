@@ -1,0 +1,38 @@
+name: Daily Data Update
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 每天 UTC 00:00 (台灣 08:00) 執行
+  workflow_dispatch:      # 允許手動按鈕執行
+
+permissions:
+  contents: write         # 賦予機器人「寫入」權限，這樣它才能更新 .db 檔
+
+jobs:
+  run-python-script:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Run ETL Script
+      env:
+        GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+      run: python main.py
+
+    - name: Commit and Push DB changes
+      run: |
+        git config --global user.name "GitHub Action Bot"
+        git config --global user.email "actions@github.com"
+        # 檢查資料庫是否有變動，有變動才上傳
+        git add gsc_data.db
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: Daily GSC Data" && git push)
