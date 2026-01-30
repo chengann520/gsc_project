@@ -9,7 +9,9 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 # ================= 設定區 =================
 SITE_URL = 'https://chengann520.github.io/Chengann/'
-SHEET_NAME = 'GSC_Data_Auto'  # Google 試算表名稱
+SHEET_NAME = 'GSC_Data_Auto'  # Google 試算表檔名
+RAW_SHEET = 'Raw_Data'        # 存放關鍵字細節的分頁
+TOTAL_SHEET = 'Daily_Total'   # 存放每日總量的分頁
 # =========================================
 
 # 定義權限範圍 (GSC + Sheets + Drive)
@@ -36,64 +38,65 @@ def get_gspread_client():
         return None
     return gspread.authorize(creds)
 
-def init_sheet():
-    """ 初始化試算表，如果沒有標題列則建立 """
-    client = get_gspread_client()
-    if not client:
-        print("錯誤：無法取得 Google Sheets 授權")
-        return None
-    
+def ensure_worksheet(spreadsheet, sheet_name, headers):
+    """ 確保分頁存在且有標題列 """
     try:
-        sh = client.open(SHEET_NAME)
-        worksheet = sh.get_worksheet(0)
-        
-        # 檢查是否有標題列 (第一列是否為空)
-        headers = worksheet.row_values(1)
-        if not headers:
-            print(f">> 試算表是空的，正在建立標題列...")
-            worksheet.append_row(['date', 'query', 'page', 'clicks', 'impressions', 'ctr', 'position'])
-        
-        return worksheet
-    except Exception as e:
-        print(f"錯誤：無法開啟試算表 '{SHEET_NAME}'。請確認已分享權限給機器人 Email。")
-        print(f"詳細錯誤: {e}")
-        return None
+        worksheet = spreadsheet.worksheet(sheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        print(f">> 建立新分頁: {sheet_name}")
+        worksheet = spreadsheet.add_worksheet(title=sheet_name, rows="1000", cols="20")
+    
+    # 檢查標題列
+    current_headers = worksheet.row_values(1)
+    if not current_headers:
+        print(f">> 寫入 {sheet_name} 標題列...")
+        worksheet.append_row(headers)
+    return worksheet
 
 def get_last_date(worksheet):
     """ 從試算表取得最後一筆資料的日期 """
     try:
-        # 取得所有日期欄位 (第一欄，排除標題)
         dates = worksheet.col_values(1)[1:]
         if not dates:
             return None
         return max(dates)
     except Exception as e:
-        print(f">> 讀取最後日期失敗: {e}")
+        print(f">> 讀取 {worksheet.title} 最後日期失敗: {e}")
         return None
 
 def fetch_gsc_data():
-    print(f"[{datetime.datetime.now()}] 開始執行 GSC 資料抓取任務...")
+    print(f"[{datetime.datetime.now()}] 開始執行 GSC v2.0 資料抓取任務...")
     
     creds = get_credentials()
     if not creds:
-        print("錯誤：找不到 GCP_CREDENTIALS 環境變數或 credentials.json")
+        print("錯誤：找不到 GCP_CREDENTIALS 或 credentials.json")
         return
     
-    worksheet = init_sheet()
-    if not worksheet:
+    client = get_gspread_client()
+    if not client:
+        return
+    
+    try:
+        sh = client.open(SHEET_NAME)
+        # 初始化兩張工作表
+        raw_ws = ensure_worksheet(sh, RAW_SHEET, ['date', 'query', 'page', 'clicks', 'impressions', 'ctr', 'position'])
+        total_ws = ensure_worksheet(sh, TOTAL_SHEET, ['date', 'clicks', 'impressions', 'ctr', 'position'])
+    except Exception as e:
+        print(f"錯誤：無法開啟試算表 '{SHEET_NAME}'。詳細內容: {e}")
         return
 
     service = build('searchconsole', 'v1', credentials=creds)
 
-    last_date_in_sheet = get_last_date(worksheet)
+    # 以 Daily_Total 的日期作為基準
+    last_date_str = get_last_date(total_ws)
     today = datetime.date.today()
     end_date = today - datetime.timedelta(days=3)
 
-    if last_date_in_sheet is None:
+    if last_date_str is None:
         start_date = today - datetime.timedelta(days=400)
         print(">> 首次執行，抓取歷史資料...")
     else:
-        last_date_obj = datetime.datetime.strptime(last_date_in_sheet, '%Y-%m-%d').date()
+        last_date_obj = datetime.datetime.strptime(last_date_str, '%Y-%m-%d').date()
         start_date = last_date_obj + datetime.timedelta(days=1)
         print(f">> 從 {start_date} 開始更新...")
 
@@ -101,35 +104,33 @@ def fetch_gsc_data():
         print(">> 資料已是最新。")
         return
 
-    request = {
+    date_range = {
         'startDate': start_date.strftime('%Y-%m-%d'),
-        'endDate': end_date.strftime('%Y-%m-%d'),
-        'dimensions': ['date', 'query', 'page'],
-        'rowLimit': 25000 
+        'endDate': end_date.strftime('%Y-%m-%d')
     }
 
     try:
-        response = service.searchanalytics().query(siteUrl=SITE_URL, body=request).execute()
-        rows = response.get('rows', [])
+        # 1. 抓取 Daily_Total (僅依日期分組)
+        print(f">> 正在抓取 {TOTAL_SHEET} 總量資料...")
+        req_total = {**date_range, 'dimensions': ['date']}
+        resp_total = service.searchanalytics().query(siteUrl=SITE_URL, body=req_total).execute()
+        rows_total = resp_total.get('rows', [])
         
-        if rows:
-            data_to_append = []
-            for row in rows:
-                data_to_append.append([
-                    row['keys'][0],    # date
-                    row['keys'][1],    # query
-                    row['keys'][2],    # page
-                    row['clicks'],
-                    row['impressions'],
-                    row['ctr'],
-                    row['position']
-                ])
-            
-            # 使用 gspread 的 append_rows 批量存入
-            worksheet.append_rows(data_to_append)
-            print(f">> 成功存入 {len(data_to_append)} 筆資料到 Google Sheets！")
-        else:
-            print(">> 無新資料。")
+        if rows_total:
+            data_total = [[r['keys'][0], r['clicks'], r['impressions'], r['ctr'], r['position']] for r in rows_total]
+            total_ws.append_rows(data_total)
+            print(f"   - 成功存入 {len(data_total)} 筆總量資料。")
+
+        # 2. 抓取 Raw_Data (依 日期/關鍵字/網頁 分組)
+        print(f">> 正在抓取 {RAW_SHEET} 細節資料...")
+        req_raw = {**date_range, 'dimensions': ['date', 'query', 'page'], 'rowLimit': 25000}
+        resp_raw = service.searchanalytics().query(siteUrl=SITE_URL, body=req_raw).execute()
+        rows_raw = resp_raw.get('rows', [])
+
+        if rows_raw:
+            data_raw = [[r['keys'][0], r['keys'][1], r['keys'][2], r['clicks'], r['impressions'], r['ctr'], r['position']] for r in rows_raw]
+            raw_ws.append_rows(data_raw)
+            print(f"   - 成功存入 {len(data_raw)} 筆細節資料。")
             
     except Exception as e:
         print(f">> GSC 資料抓取發生錯誤: {e}")
