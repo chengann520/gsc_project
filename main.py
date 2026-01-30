@@ -78,9 +78,9 @@ def fetch_gsc_data():
     
     try:
         sh = client.open(SHEET_NAME)
-        # 初始化兩張工作表 (增加 device 欄位)
-        raw_ws = ensure_worksheet(sh, RAW_SHEET, ['date', 'query', 'page', 'device', 'clicks', 'impressions', 'ctr', 'position'])
-        total_ws = ensure_worksheet(sh, TOTAL_SHEET, ['date', 'device', 'clicks', 'impressions', 'ctr', 'position'])
+        # 初始化兩張工作表
+        raw_ws = ensure_worksheet(sh, RAW_SHEET, ['date', 'query', 'page', 'clicks', 'impressions', 'ctr', 'position'])
+        total_ws = ensure_worksheet(sh, TOTAL_SHEET, ['date', 'clicks', 'impressions', 'ctr', 'position'])
     except Exception as e:
         print(f"錯誤：無法開啟試算表 '{SHEET_NAME}'。詳細內容: {e}")
         return
@@ -110,25 +110,25 @@ def fetch_gsc_data():
     }
 
     try:
-        # 1. 抓取 Daily_Total (依 日期/裝置 分組)
-        print(f">> 正在抓取 {TOTAL_SHEET} 總量資料 (含裝置)...")
-        req_total = {**date_range, 'dimensions': ['date', 'device']}
+        # 1. 抓取 Daily_Total (僅依日期分組)
+        print(f">> 正在抓取 {TOTAL_SHEET} 總量資料...")
+        req_total = {**date_range, 'dimensions': ['date']}
         resp_total = service.searchanalytics().query(siteUrl=SITE_URL, body=req_total).execute()
         rows_total = resp_total.get('rows', [])
         
         if rows_total:
-            data_total = [[r['keys'][0], r['keys'][1], r['clicks'], r['impressions'], r['ctr'], r['position']] for r in rows_total]
+            data_total = [[r['keys'][0], r['clicks'], r['impressions'], r['ctr'], r['position']] for r in rows_total]
             total_ws.append_rows(data_total)
             print(f"   - 成功存入 {len(data_total)} 筆總量資料。")
 
-        # 2. 抓取 Raw_Data (依 日期/關鍵字/網頁/裝置 分組)
-        print(f">> 正在抓取 {RAW_SHEET} 細節資料 (含裝置)...")
-        req_raw = {**date_range, 'dimensions': ['date', 'query', 'page', 'device'], 'rowLimit': 25000}
+        # 2. 抓取 Raw_Data (依 日期/關鍵字/網頁 分組)
+        print(f">> 正在抓取 {RAW_SHEET} 細節資料...")
+        req_raw = {**date_range, 'dimensions': ['date', 'query', 'page'], 'rowLimit': 25000}
         resp_raw = service.searchanalytics().query(siteUrl=SITE_URL, body=req_raw).execute()
         rows_raw = resp_raw.get('rows', [])
 
         if rows_raw:
-            data_raw = [[r['keys'][0], r['keys'][1], r['keys'][2], r['keys'][3], r['clicks'], r['impressions'], r['ctr'], r['position']] for r in rows_raw]
+            data_raw = [[r['keys'][0], r['keys'][1], r['keys'][2], r['clicks'], r['impressions'], r['ctr'], r['position']] for r in rows_raw]
             raw_ws.append_rows(data_raw)
             print(f"   - 成功存入 {len(data_raw)} 筆細節資料。")
             
