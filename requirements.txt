@@ -2,3 +2,5 @@ google-api-python-client
 google-auth
 pandas
 google-analytics-data
+gspread
+oauth2client
