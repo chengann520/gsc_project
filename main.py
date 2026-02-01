@@ -12,6 +12,8 @@ SITE_URL = 'https://chengann520.github.io/Chengann/'
 SHEET_NAME = 'GSC_Data_Auto'  # Google 試算表檔名
 RAW_SHEET = 'Raw_Data'        # 存放關鍵字細節的分頁
 TOTAL_SHEET = 'Daily_Total'   # 存放每日總量的分頁
+DEVICE_SHEET = 'Device_Data'  # 存放裝置資料的分頁
+QUERY_SHEET = 'Query_Data'    # 存放每日關鍵字的小計分頁
 # =========================================
 
 # 定義權限範圍 (GSC + Sheets + Drive)
@@ -65,7 +67,7 @@ def get_last_date(worksheet):
         return None
 
 def fetch_gsc_data():
-    print(f"[{datetime.datetime.now()}] 開始執行 GSC v2.0 資料抓取任務...")
+    print(f"[{datetime.datetime.now()}] 開始執行 GSC v4.0 資料抓取任務...")
     
     creds = get_credentials()
     if not creds:
@@ -78,9 +80,11 @@ def fetch_gsc_data():
     
     try:
         sh = client.open(SHEET_NAME)
-        # 初始化兩張工作表
+        # 初始化工作表
         raw_ws = ensure_worksheet(sh, RAW_SHEET, ['date', 'query', 'page', 'clicks', 'impressions', 'ctr', 'position'])
         total_ws = ensure_worksheet(sh, TOTAL_SHEET, ['date', 'clicks', 'impressions', 'ctr', 'position'])
+        device_ws = ensure_worksheet(sh, DEVICE_SHEET, ['date', 'device', 'clicks', 'impressions', 'ctr', 'position'])
+        query_ws = ensure_worksheet(sh, QUERY_SHEET, ['date', 'query', 'clicks', 'impressions', 'ctr', 'position'])
     except Exception as e:
         print(f"錯誤：無法開啟試算表 '{SHEET_NAME}'。詳細內容: {e}")
         return
@@ -133,6 +137,28 @@ def fetch_gsc_data():
             print(f"   - 成功存入 {len(data_raw)} 筆細節資料。")
         else:
             print(">> ⚠️ 本次查詢無詳細關鍵字資料 (可能是流量低或隱私過濾)，Google 回傳空列表。")
+
+        # 3. 抓取 Device_Data (依 日期/裝置 分組)
+        print(f">> 正在抓取 {DEVICE_SHEET} 裝置資料...")
+        req_device = {**date_range, 'dimensions': ['date', 'device']}
+        resp_device = service.searchanalytics().query(siteUrl=SITE_URL, body=req_device).execute()
+        rows_device = resp_device.get('rows', [])
+        
+        if rows_device:
+            data_device = [[r['keys'][0], r['keys'][1], r['clicks'], r['impressions'], r['ctr'], r['position']] for r in rows_device]
+            device_ws.append_rows(data_device)
+            print(f"   - 成功存入 {len(data_device)} 筆裝置資料。")
+
+        # 4. 抓取 Query_Data (依 日期/關鍵字 分組)
+        print(f">> 正在抓取 {QUERY_SHEET} 關鍵字資料...")
+        req_query = {**date_range, 'dimensions': ['date', 'query']}
+        resp_query = service.searchanalytics().query(siteUrl=SITE_URL, body=req_query).execute()
+        rows_query = resp_query.get('rows', [])
+        
+        if rows_query:
+            data_query = [[r['keys'][0], r['keys'][1], r['clicks'], r['impressions'], r['ctr'], r['position']] for r in rows_query]
+            query_ws.append_rows(data_query)
+            print(f"   - 成功存入 {len(data_query)} 筆關鍵字資料。")
             
     except Exception as e:
         print(f">> GSC 資料抓取發生錯誤: {e}")
