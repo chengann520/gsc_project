@@ -131,6 +131,8 @@ def fetch_gsc_data():
             data_raw = [[r['keys'][0], r['keys'][1], r['keys'][2], r['clicks'], r['impressions'], r['ctr'], r['position']] for r in rows_raw]
             raw_ws.append_rows(data_raw)
             print(f"   - 成功存入 {len(data_raw)} 筆細節資料。")
+        else:
+            print(">> ⚠️ 本次查詢無詳細關鍵字資料 (可能是流量低或隱私過濾)，Google 回傳空列表。")
             
     except Exception as e:
         print(f">> GSC 資料抓取發生錯誤: {e}")
